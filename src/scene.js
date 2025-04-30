@@ -31,6 +31,18 @@ export const createScene = () => {
         HIGHLIGHT_COLOR: '#2196F3',
     };
 
+    function setupViewport() {
+        if (!document.querySelector('meta[name="viewport"]')) {
+            const meta = document.createElement('meta');
+            meta.name = 'viewport';
+            meta.content =
+                'width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no';
+            document.head.appendChild(meta);
+        }
+    }
+
+    setupViewport();
+
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(COLORS.BACKGROUND);
 
@@ -68,6 +80,8 @@ export const createScene = () => {
         currentLinePoints: [],
         dots: [],
         uiElements: [],
+        touchStartedOverUI: false,
+        isMobile: isMobileDevice(),
     };
 
     const raycaster = new THREE.Raycaster();
@@ -78,6 +92,12 @@ export const createScene = () => {
     setupUI();
     setupEventListeners();
     animate();
+
+    function isMobileDevice() {
+        return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+            navigator.userAgent
+        );
+    }
 
     function screenToWorld(clientX, clientY) {
         mouse.set(
@@ -497,6 +517,37 @@ export const createScene = () => {
         particle.position.copy(basePosition).add(offset);
     }
 
+    function handleTouchStart(event) {
+        event.preventDefault();
+
+        const touch = event.touches[0];
+        state.touchStartedOverUI = isOverUI(touch.clientX, touch.clientY);
+
+        if (!state.touchStartedOverUI) {
+            startLine({
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+            });
+        }
+    }
+
+    function handleTouchMove(event) {
+        event.preventDefault();
+
+        if (!state.touchStartedOverUI && state.isDrawing) {
+            const touch = event.touches[0];
+            updateLine({
+                clientX: touch.clientX,
+                clientY: touch.clientY,
+            });
+        }
+    }
+
+    function handleTouchEnd(event) {
+        state.touchStartedOverUI = false;
+        endLine();
+    }
+
     function setupUI() {
         const clearBtn = createClearButton();
         document.body.appendChild(clearBtn);
@@ -505,6 +556,43 @@ export const createScene = () => {
         const controls = createControlPanel();
         document.body.appendChild(controls.panel);
         state.uiElements.push(controls.panel);
+
+        if (state.isMobile) {
+            makeUIMobileFriendly();
+        }
+    }
+
+    function makeUIMobileFriendly() {
+        const clearBtn = document.querySelector('button');
+        if (clearBtn) {
+            clearBtn.style.fontSize = '64px';
+            clearBtn.style.padding = '15px 20px';
+            clearBtn.style.bottom = '25px';
+            clearBtn.style.right = '25px';
+        }
+
+        const sliderStyles = document.createElement('style');
+        sliderStyles.textContent = `
+            input[type=range]::-webkit-slider-thumb {
+                width: 24px !important;
+                height: 24px !important;
+            }
+            input[type=range]::-moz-range-thumb {
+                width: 24px !important;
+                height: 24px !important;
+            }
+            input[type=range] {
+                height: 30px !important;
+            }
+        `;
+        document.head.appendChild(sliderStyles);
+
+        const panel = document.querySelector('div[style*="position: fixed"]');
+        if (panel) {
+            panel.style.width = '250px';
+            panel.style.padding = '20px';
+            panel.style.fontSize = '16px';
+        }
     }
 
     function isOverUI(x, y) {
@@ -524,35 +612,32 @@ export const createScene = () => {
 
     function createClearButton() {
         const btn = document.createElement('button');
-        btn.textContent = 'clear';
+        btn.textContent = 'X';
         Object.assign(btn.style, {
             position: 'fixed',
             bottom: '15px',
             right: '15px',
-            background: UI.BUTTON_BACKGROUND,
+            background: 'transparent',
             color: 'white',
-            fontSize: '11px',
+            fontSize: '48px',
             fontFamily: 'Roboto, Arial, sans-serif',
-            fontWeight: '400',
+            fontWeight: '600',
             border: 'none',
-            borderRadius: '3px',
-            padding: '6px 12px',
+            borderRadius: '50%',
+            padding: '8px 10px',
             cursor: 'pointer',
-            boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
-            textTransform: 'lowercase',
+            textTransform: 'none',
             letterSpacing: '0.5px',
-            transition: 'background 0.3s, transform 0.2s, box-shadow 0.3s',
+            transition: 'transform 0.2s',
             zIndex: '1000',
         });
 
         btn.addEventListener('mouseover', () => {
-            btn.style.background = UI.BUTTON_BACKGROUND_HOVER;
-            btn.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
+            btn.style.transform = 'scale(1.2)';
         });
 
         btn.addEventListener('mouseout', () => {
-            btn.style.background = UI.BUTTON_BACKGROUND;
-            btn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.2)';
+            btn.style.transform = 'scale(1)';
         });
 
         btn.addEventListener('mousedown', () => {
@@ -564,6 +649,15 @@ export const createScene = () => {
         });
 
         btn.addEventListener('click', clearScene);
+
+        btn.addEventListener('touchstart', () => {
+            btn.style.transform = 'scale(0.95)';
+        });
+
+        btn.addEventListener('touchend', () => {
+            btn.style.transform = 'scale(1)';
+            clearScene();
+        });
 
         return btn;
     }
@@ -732,13 +826,25 @@ export const createScene = () => {
         window.addEventListener('mousedown', startLine);
         window.addEventListener('mousemove', updateLine);
         window.addEventListener('mouseup', endLine);
+
+        window.addEventListener('touchstart', handleTouchStart, {
+            passive: false,
+        });
+        window.addEventListener('touchmove', handleTouchMove, {
+            passive: false,
+        });
+        window.addEventListener('touchend', handleTouchEnd);
+        window.addEventListener('touchcancel', handleTouchEnd);
+
         window.addEventListener('resize', handleResize);
+        window.addEventListener('orientationchange', handleResize);
     }
 
     function handleResize() {
         camera.aspect = window.innerWidth / window.innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     }
 
     function animate(time = 0) {
@@ -756,7 +862,12 @@ export const createScene = () => {
             window.removeEventListener('mousedown', startLine);
             window.removeEventListener('mousemove', updateLine);
             window.removeEventListener('mouseup', endLine);
+            window.removeEventListener('touchstart', handleTouchStart);
+            window.removeEventListener('touchmove', handleTouchMove);
+            window.removeEventListener('touchend', handleTouchEnd);
+            window.removeEventListener('touchcancel', handleTouchEnd);
             window.removeEventListener('resize', handleResize);
+            window.removeEventListener('orientationchange', handleResize);
 
             clearScene();
 
