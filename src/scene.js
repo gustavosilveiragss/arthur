@@ -31,6 +31,18 @@ export const createScene = () => {
         HIGHLIGHT_COLOR: '#2196F3',
     };
 
+    const fpsState = {
+        frameCount: 0,
+        lastFrameTime: performance.now(),
+        lastFpsUpdate: performance.now(),
+        fps: 0,
+        fpsElement: null,
+    };
+
+    const FPS_TARGET = 30;
+    const FRAME_INTERVAL = 1000 / FPS_TARGET;
+    let lastTime = 0;
+
     function setupViewport() {
         if (!document.querySelector('meta[name="viewport"]')) {
             const meta = document.createElement('meta');
@@ -162,13 +174,8 @@ export const createScene = () => {
 
     function clearScene() {
         for (const dotsGroup of state.dots) {
-            scene.remove(dotsGroup);
-
-            for (const sphere of dotsGroup.children) {
-                if (sphere.geometry && sphere.userData.needsDisposal) {
-                    sphere.geometry.dispose();
-                }
-            }
+            scene.remove(dotsGroup.instancedMesh);
+            dotsGroup.instancedMesh.geometry.dispose();
         }
         state.dots = [];
 
@@ -200,7 +207,7 @@ export const createScene = () => {
             pathMetrics.totalLength
         );
 
-        scene.add(dotsGroup);
+        scene.add(dotsGroup.instancedMesh);
         state.dots.push(dotsGroup);
     }
 
@@ -339,36 +346,58 @@ export const createScene = () => {
         cumulativeDistances,
         totalPathLength
     ) {
-        const group = new THREE.Group();
+        const count = positions.length;
+        const instancedMesh = new THREE.InstancedMesh(
+            sphereGeometry,
+            materials.dot,
+            count
+        );
+        instancedMesh.count = count;
 
-        group.userData.path = {
-            points: pathPoints,
-            cumulativeDistances,
-            totalLength: totalPathLength,
+        const group = {
+            instancedMesh,
+            count,
+            userData: {
+                path: {
+                    points: pathPoints,
+                    cumulativeDistances,
+                    totalLength: totalPathLength,
+                },
+                particles: Array(count),
+            },
         };
 
-        positions.forEach((position, index) => {
+        // Create particle data and set initial transforms
+        const matrix = new THREE.Matrix4();
+        const position = new THREE.Vector3();
+        const quaternion = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+
+        positions.forEach((pos, index) => {
             const size = sizes[index] || 1;
             const particlePathInfo = pathInfo[index];
 
-            const geometry = sphereGeometry.clone();
-            const sphere = new THREE.Mesh(geometry, materials.dot);
+            const particle = {
+                originalPosition: pos.clone(),
+                initialOffset: particlePathInfo.initialOffset.clone(),
+                baseSize: 0.02 * size * params.particleSize,
+                age: Math.random() * params.particleLifetime,
+                lifetime: params.particleLifetime,
+                speed: params.particleSpeed + Math.random() * params.particleSpeed * 0.5,
+                pathProgress: particlePathInfo.pathProgress,
+            };
 
-            sphere.position.copy(position);
-            sphere.userData.needsDisposal = true;
-            sphere.userData.originalPosition = position.clone();
-            sphere.userData.initialOffset =
-                particlePathInfo.initialOffset.clone();
-            sphere.userData.baseSize = 0.02 * size * params.particleSize;
-            sphere.userData.age = Math.random() * params.particleLifetime;
-            sphere.userData.lifetime = params.particleLifetime;
-            sphere.userData.speed =
-                params.particleSpeed +
-                Math.random() * params.particleSpeed * 0.5;
-            sphere.userData.pathProgress = particlePathInfo.pathProgress;
+            group.userData.particles[index] = particle;
 
-            group.add(sphere);
+            // Set initial transform
+            position.copy(pos);
+            quaternion.identity();
+            scale.setScalar(particle.baseSize);
+            matrix.compose(position, quaternion, scale);
+            instancedMesh.setMatrixAt(index, matrix);
         });
+
+        instancedMesh.instanceMatrix.needsUpdate = true;
 
         return group;
     }
@@ -376,53 +405,66 @@ export const createScene = () => {
     function updateDots(delta) {
         if (delta <= 0 || delta >= 0.1) return;
 
+        const matrix = new THREE.Matrix4();
+        const position = new THREE.Vector3();
+        const quaternion = new THREE.Quaternion();
+        const scale = new THREE.Vector3();
+
         for (const dotsGroup of state.dots) {
             const pathData = dotsGroup.userData.path;
+            const instancedMesh = dotsGroup.instancedMesh;
+            let needsUpdate = false;
 
-            for (const dot of dotsGroup.children) {
-                dot.userData.age += delta;
+            for (let i = 0; i < dotsGroup.count; i++) {
+                const particle = dotsGroup.userData.particles[i];
+                particle.age += delta;
 
-                if (dot.userData.age > dot.userData.lifetime) {
-                    dot.userData.age = 0;
-                    dot.position.copy(dot.userData.originalPosition);
-                    dot.userData.pathProgress = getPathProgressFromPosition(
-                        dot.position,
+                if (particle.age > particle.lifetime) {
+                    particle.age = 0;
+                    particle.pathProgress = getPathProgressFromPosition(
+                        particle.originalPosition,
                         pathData.points,
-                        dot.userData.initialOffset
+                        particle.initialOffset
                     );
                 }
 
-                const progress = dot.userData.age / dot.userData.lifetime;
-                updateDotSize(dot, progress);
+                const progress = particle.age / particle.lifetime;
+                
+                // Update size
+                let sizeFactor;
+                if (progress < 0.5) {
+                    sizeFactor = THREE.MathUtils.mapLinear(progress, 0, 0.5, 0.2, 1.2);
+                } else {
+                    sizeFactor = THREE.MathUtils.mapLinear(progress, 0.5, 1, 1.2, 0.2);
+                }
+                const scaleValue = particle.baseSize * sizeFactor;
 
-                const moveAmount = dot.userData.speed * delta;
+                // Update position
+                const moveAmount = particle.speed * delta;
                 const distanceToMove = moveAmount * pathData.totalLength;
-
-                dot.userData.pathProgress +=
-                    distanceToMove / pathData.totalLength;
+                particle.pathProgress += distanceToMove / pathData.totalLength;
 
                 updateParticlePositionAlongPath(
-                    dot,
-                    dot.userData.pathProgress,
+                    position,
+                    particle.pathProgress,
                     pathData.points,
                     pathData.cumulativeDistances,
                     pathData.totalLength,
-                    dot.userData.initialOffset
+                    particle.initialOffset
                 );
+
+                // Apply transform
+                quaternion.identity();
+                scale.setScalar(scaleValue);
+                matrix.compose(position, quaternion, scale);
+                instancedMesh.setMatrixAt(i, matrix);
+                needsUpdate = true;
+            }
+
+            if (needsUpdate) {
+                instancedMesh.instanceMatrix.needsUpdate = true;
             }
         }
-    }
-
-    function updateDotSize(dot, progress) {
-        let sizeFactor;
-        if (progress < 0.5) {
-            sizeFactor = THREE.MathUtils.mapLinear(progress, 0, 0.5, 0.2, 1.2);
-        } else {
-            sizeFactor = THREE.MathUtils.mapLinear(progress, 0.5, 1, 1.2, 0.2);
-        }
-
-        const scale = dot.userData.baseSize * sizeFactor;
-        dot.scale.set(scale, scale, scale);
     }
 
     function getPathProgressFromPosition(position, pathPoints, offset) {
@@ -476,7 +518,7 @@ export const createScene = () => {
     }
 
     function updateParticlePositionAlongPath(
-        particle,
+        outPosition,
         progress,
         pathPoints,
         cumulativeDistances,
@@ -514,7 +556,7 @@ export const createScene = () => {
             segmentProgress
         );
 
-        particle.position.copy(basePosition).add(offset);
+        outPosition.copy(basePosition).add(offset);
     }
 
     function handleTouchStart(event) {
@@ -677,6 +719,21 @@ export const createScene = () => {
             width: '200px',
             fontFamily: 'Roboto, Arial, sans-serif',
         });
+
+        const fpsContainer = document.createElement('div');
+        fpsContainer.textContent = 'FPS: --';
+        Object.assign(fpsContainer.style, {
+            marginBottom: '10px',
+            fontSize: '12px',
+            fontWeight: '600',
+            color: UI.HIGHLIGHT_COLOR,
+            background: 'rgba(0, 0, 0, 0.2)',
+            padding: '5px',
+            borderRadius: '3px',
+            textAlign: 'center',
+        });
+        panel.appendChild(fpsContainer);
+        fpsState.fpsElement = fpsContainer;
 
         const controls = {};
 
@@ -847,14 +904,37 @@ export const createScene = () => {
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     }
 
-    function animate(time = 0) {
-        const lastTime = animate.lastTime || 0;
-        const delta = (time - lastTime) / 1000;
-        animate.lastTime = time;
+    function updateFPS(currentTime) {
+        fpsState.frameCount++;
+        
+        if (currentTime - fpsState.lastFpsUpdate >= 500) {
+            const timeDelta = currentTime - fpsState.lastFpsUpdate;
+            const fps = Math.round((fpsState.frameCount * 1000) / timeDelta);
+            
+            fpsState.fps = fps;
+            if (fpsState.fpsElement) {
+                fpsState.fpsElement.textContent = `FPS: ${fps}`;
+            }
+            
+            fpsState.frameCount = 0;
+            fpsState.lastFpsUpdate = currentTime;
+        }
+    }
 
+    function animate(time = 0) {
         requestAnimationFrame(animate);
-        updateDots(delta);
-        renderer.render(scene, camera);
+
+        const now = performance.now();
+        const elapsed = now - lastTime;
+
+        if (elapsed >= FRAME_INTERVAL) {
+            const delta = elapsed / 1000;
+            lastTime = now - (elapsed % FRAME_INTERVAL);
+
+            updateFPS(now);
+            updateDots(delta);
+            renderer.render(scene, camera);
+        }
     }
 
     return {
@@ -874,6 +954,11 @@ export const createScene = () => {
             for (const element of state.uiElements) {
                 document.body.removeChild(element);
             }
+            
+            if (fpsState.fpsElement && fpsState.fpsElement.parentNode) {
+                fpsState.fpsElement.parentNode.removeChild(fpsState.fpsElement);
+            }
+            
             document.body.removeChild(renderer.domElement);
 
             sphereGeometry.dispose();
