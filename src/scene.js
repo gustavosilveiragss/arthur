@@ -62,7 +62,7 @@ export const createScene = () => {
         CAMERA.FOV,
         window.innerWidth / window.innerHeight,
         CAMERA.NEAR,
-        CAMERA.FAR
+        CAMERA.FAR,
     );
     camera.position.z = CAMERA.POSITION_Z;
 
@@ -86,6 +86,8 @@ export const createScene = () => {
         particleDensity: DEFAULTS.PARTICLE_DENSITY,
     };
 
+    let currentColor = '#ffffff';
+
     const state = {
         isDrawing: false,
         currentLine: null,
@@ -107,15 +109,12 @@ export const createScene = () => {
 
     function isMobileDevice() {
         return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-            navigator.userAgent
+            navigator.userAgent,
         );
     }
 
     function screenToWorld(clientX, clientY) {
-        mouse.set(
-            (clientX / window.innerWidth) * 2 - 1,
-            -(clientY / window.innerHeight) * 2 + 1
-        );
+        mouse.set((clientX / window.innerWidth) * 2 - 1, -(clientY / window.innerHeight) * 2 + 1);
         raycaster.setFromCamera(mouse, camera);
         raycaster.ray.intersectPlane(planeZ, point);
         return point.clone();
@@ -128,10 +127,10 @@ export const createScene = () => {
         const worldPoint = screenToWorld(event.clientX, event.clientY);
         state.currentLinePoints = [worldPoint, worldPoint.clone()];
 
-        const geometry = new THREE.BufferGeometry().setFromPoints(
-            state.currentLinePoints
-        );
-        state.currentLine = new THREE.Line(geometry, materials.line);
+        const geometry = new THREE.BufferGeometry().setFromPoints(state.currentLinePoints);
+        const lineMaterial = materials.line.clone();
+        lineMaterial.color.set(currentColor);
+        state.currentLine = new THREE.Line(geometry, lineMaterial);
         scene.add(state.currentLine);
     }
 
@@ -143,13 +142,11 @@ export const createScene = () => {
             return;
         }
 
-        state.currentLinePoints.push(
-            screenToWorld(event.clientX, event.clientY)
-        );
+        state.currentLinePoints.push(screenToWorld(event.clientX, event.clientY));
 
         if (state.currentLine.geometry) state.currentLine.geometry.dispose();
         state.currentLine.geometry = new THREE.BufferGeometry().setFromPoints(
-            state.currentLinePoints
+            state.currentLinePoints,
         );
     }
 
@@ -164,8 +161,7 @@ export const createScene = () => {
 
         if (state.currentLine) {
             scene.remove(state.currentLine);
-            if (state.currentLine.geometry)
-                state.currentLine.geometry.dispose();
+            if (state.currentLine.geometry) state.currentLine.geometry.dispose();
             state.currentLine = null;
         }
 
@@ -181,8 +177,7 @@ export const createScene = () => {
 
         if (state.currentLine) {
             scene.remove(state.currentLine);
-            if (state.currentLine.geometry)
-                state.currentLine.geometry.dispose();
+            if (state.currentLine.geometry) state.currentLine.geometry.dispose();
             state.currentLine = null;
         }
 
@@ -193,10 +188,7 @@ export const createScene = () => {
         if (points.length < 2) return;
 
         const pathMetrics = calculatePathMetrics(points);
-        const { dotPositions, dotSizes, pathInfo } = generateDotData(
-            points,
-            pathMetrics
-        );
+        const { dotPositions, dotSizes, pathInfo } = generateDotData(points, pathMetrics);
 
         const dotsGroup = createDotsGroup(
             dotPositions,
@@ -204,7 +196,7 @@ export const createScene = () => {
             pathInfo,
             points,
             pathMetrics.cumulativeDistances,
-            pathMetrics.totalLength
+            pathMetrics.totalLength,
         );
 
         scene.add(dotsGroup.instancedMesh);
@@ -218,9 +210,7 @@ export const createScene = () => {
         for (let i = 1; i < points.length; i++) {
             const segmentLength = points[i - 1].distanceTo(points[i]);
             totalLength += segmentLength;
-            cumulativeDistances.push(
-                cumulativeDistances[i - 1] + segmentLength
-            );
+            cumulativeDistances.push(cumulativeDistances[i - 1] + segmentLength);
         }
 
         return { totalLength, cumulativeDistances };
@@ -239,9 +229,7 @@ export const createScene = () => {
             const segmentStart = points[i - 1];
             const segmentEnd = points[i];
             const segmentLength = segmentStart.distanceTo(segmentEnd);
-            const direction = new THREE.Vector3()
-                .subVectors(segmentEnd, segmentStart)
-                .normalize();
+            const direction = new THREE.Vector3().subVectors(segmentEnd, segmentStart).normalize();
 
             const progress = currentLength / pathMetrics.totalLength;
             const densityMultiplier = Math.pow(1 - progress, 3) * 8 + 0.5;
@@ -252,8 +240,8 @@ export const createScene = () => {
                     segmentLength *
                         DEFAULTS.DOTS_PER_UNIT *
                         densityMultiplier *
-                        params.particleDensity
-                )
+                        params.particleDensity,
+                ),
             );
 
             createDotsForSegment(
@@ -268,7 +256,7 @@ export const createScene = () => {
                 dotSizes,
                 pathInfo,
                 i - 1,
-                currentLength / pathMetrics.totalLength
+                currentLength / pathMetrics.totalLength,
             );
 
             currentLength += segmentLength;
@@ -289,39 +277,24 @@ export const createScene = () => {
         sizes,
         pathInfo,
         segmentIndex,
-        segmentStartProgress
+        segmentStartProgress,
     ) {
         const densityFalloff = Math.exp(-4 * progress);
         const adjustedNumDots = Math.ceil(numDots * densityFalloff);
 
         for (let j = 0; j < adjustedNumDots; j++) {
             const segmentProgress = Math.pow(Math.random(), 1 + progress * 2);
-            const basePosition = new THREE.Vector3().lerpVectors(
-                start,
-                end,
-                segmentProgress
-            );
+            const basePosition = new THREE.Vector3().lerpVectors(start, end, segmentProgress);
 
             const sprayWidth =
-                (baseWidth + (maxWidth - baseWidth) * Math.pow(progress, 0.8)) *
-                params.sprayWidth;
+                (baseWidth + (maxWidth - baseWidth) * Math.pow(progress, 0.8)) * params.sprayWidth;
             const randomAngle = Math.random() * Math.PI * 2;
 
             const spreadFactor = 0.2 + progress * 0.8;
-            const xOffset =
-                Math.cos(randomAngle) *
-                sprayWidth *
-                Math.random() *
-                spreadFactor;
-            const yOffset =
-                Math.sin(randomAngle) *
-                sprayWidth *
-                Math.random() *
-                spreadFactor;
+            const xOffset = Math.cos(randomAngle) * sprayWidth * Math.random() * spreadFactor;
+            const yOffset = Math.sin(randomAngle) * sprayWidth * Math.random() * spreadFactor;
 
-            const finalPosition = basePosition
-                .clone()
-                .add(new THREE.Vector3(xOffset, yOffset, 0));
+            const finalPosition = basePosition.clone().add(new THREE.Vector3(xOffset, yOffset, 0));
             positions.push(finalPosition);
 
             const sizeFactor = 1.2 + 0.5 * Math.pow(1 - progress, 2);
@@ -330,9 +303,7 @@ export const createScene = () => {
             pathInfo.push({
                 segmentIndex,
                 segmentProgress,
-                pathProgress:
-                    segmentStartProgress +
-                    segmentProgress * (1 / (positions.length - 1)),
+                pathProgress: segmentStartProgress + segmentProgress * (1 / (positions.length - 1)),
                 initialOffset: new THREE.Vector3(xOffset, yOffset, 0),
             });
         }
@@ -344,12 +315,14 @@ export const createScene = () => {
         pathInfo,
         pathPoints,
         cumulativeDistances,
-        totalPathLength
+        totalPathLength,
     ) {
         const count = positions.length;
+        const dotMaterial = materials.dot.clone();
+        dotMaterial.color.set(currentColor);
         const instancedMesh = new THREE.InstancedMesh(
             sphereGeometry,
-            materials.dot,
+            dotMaterial,
             count
         );
         instancedMesh.count = count;
@@ -424,12 +397,12 @@ export const createScene = () => {
                     particle.pathProgress = getPathProgressFromPosition(
                         particle.originalPosition,
                         pathData.points,
-                        particle.initialOffset
+                        particle.initialOffset,
                     );
                 }
 
                 const progress = particle.age / particle.lifetime;
-                
+
                 // Update size
                 let sizeFactor;
                 if (progress < 0.5) {
@@ -450,7 +423,7 @@ export const createScene = () => {
                     pathData.points,
                     pathData.cumulativeDistances,
                     pathData.totalLength,
-                    particle.initialOffset
+                    particle.initialOffset,
                 );
 
                 // Apply transform
@@ -489,8 +462,7 @@ export const createScene = () => {
 
                 const segmentLength = start.distanceTo(end);
                 const startToClosest = start.distanceTo(closestPoint);
-                const segmentProgress =
-                    segmentLength > 0 ? startToClosest / segmentLength : 0;
+                const segmentProgress = segmentLength > 0 ? startToClosest / segmentLength : 0;
 
                 closestProgress = segmentProgress;
             }
@@ -508,13 +480,10 @@ export const createScene = () => {
         }
 
         const currentSegmentLength = pathPoints[closestSegmentIndex].distanceTo(
-            pathPoints[closestSegmentIndex + 1]
+            pathPoints[closestSegmentIndex + 1],
         );
 
-        return (
-            (pathLengthBeforeSegment + closestProgress * currentSegmentLength) /
-            totalPathLength
-        );
+        return (pathLengthBeforeSegment + closestProgress * currentSegmentLength) / totalPathLength;
     }
 
     function updateParticlePositionAlongPath(
@@ -523,7 +492,7 @@ export const createScene = () => {
         pathPoints,
         cumulativeDistances,
         totalLength,
-        offset
+        offset,
     ) {
         progress = progress % 1;
 
@@ -546,14 +515,12 @@ export const createScene = () => {
         const segmentLength = segmentEnd.distanceTo(segmentStart);
         const segmentStartDistance = cumulativeDistances[segmentIndex];
         const segmentProgress =
-            segmentLength > 0
-                ? (targetDistance - segmentStartDistance) / segmentLength
-                : 0;
+            segmentLength > 0 ? (targetDistance - segmentStartDistance) / segmentLength : 0;
 
         const basePosition = new THREE.Vector3().lerpVectors(
             segmentStart,
             segmentEnd,
-            segmentProgress
+            segmentProgress,
         );
 
         outPosition.copy(basePosition).add(offset);
@@ -613,6 +580,15 @@ export const createScene = () => {
             clearBtn.style.right = '25px';
         }
 
+        const panel = document.querySelector('.control-panel');
+        if (panel) {
+            panel.style.width = '250px';
+            panel.style.fontSize = '16px';
+            panel.style.padding = '20px';
+            panel.querySelector('.toggle-button').style.width = '30px';
+            panel.querySelector('.toggle-button').style.height = '30px';
+        }
+
         const sliderStyles = document.createElement('style');
         sliderStyles.textContent = `
             input[type=range]::-webkit-slider-thumb {
@@ -628,24 +604,12 @@ export const createScene = () => {
             }
         `;
         document.head.appendChild(sliderStyles);
-
-        const panel = document.querySelector('div[style*="position: fixed"]');
-        if (panel) {
-            panel.style.width = '250px';
-            panel.style.padding = '20px';
-            panel.style.fontSize = '16px';
-        }
     }
 
     function isOverUI(x, y) {
         for (const element of state.uiElements) {
             const rect = element.getBoundingClientRect();
-            if (
-                x >= rect.left &&
-                x <= rect.right &&
-                y >= rect.top &&
-                y <= rect.bottom
-            ) {
+            if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
                 return true;
             }
         }
@@ -706,18 +670,112 @@ export const createScene = () => {
 
     function createControlPanel() {
         const panel = document.createElement('div');
-        Object.assign(panel.style, {
-            position: 'fixed',
-            top: '15px',
-            left: '15px',
-            background: UI.PANEL_BACKGROUND,
-            color: UI.TEXT_COLOR,
-            padding: '12px',
-            borderRadius: '3px',
-            boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
-            zIndex: '1000',
-            width: '200px',
-            fontFamily: 'Roboto, Arial, sans-serif',
+        panel.className = 'control-panel';
+
+        const content = document.createElement('div');
+        content.className = 'panel-content';
+        panel.appendChild(content);
+
+        const toggleButton = document.createElement('button');
+        toggleButton.className = 'toggle-button';
+        panel.appendChild(toggleButton);
+
+        const style = document.createElement('style');
+        style.textContent = `
+            .control-panel {
+                position: fixed;
+                top: 15px;
+                left: 15px;
+                background: ${UI.PANEL_BACKGROUND};
+                color: ${UI.TEXT_COLOR};
+                padding: 12px;
+                border-radius: 3px;
+                box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+                z-index: 1000;
+                width: 200px;
+                transition: all 0.3s ease;
+                overflow: hidden;
+                font-family: Roboto, Arial, sans-serif;
+                opacity: 1;
+            }
+            
+            .control-panel.collapsed {
+                width: 30px;
+                padding: 12px 0;
+                cursor: pointer;
+                background: none;
+            }
+            
+            .panel-content {
+                transition: opacity 0.3s ease;
+            }
+            
+            .control-panel.collapsed .panel-content {
+                opacity: 0;
+                pointer-events: none;
+            }
+            
+            .toggle-button {
+                position: absolute;
+                right: 5px;
+                top: 50%;
+                transform: translateY(-50%);
+                background: none;
+                border: none;
+                color: ${UI.TEXT_COLOR};
+                cursor: pointer;
+                padding: 0;
+                width: 20px;
+                height: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                opacity: 1 !important;
+            }
+            
+            .toggle-button::before {
+                content: '❮';
+                font-size: 16px;
+                transition: transform 0.3s ease;
+            }
+            
+            .control-panel.collapsed .toggle-button::before {
+                transform: rotate(180deg);
+            }
+        `;
+        document.head.appendChild(style);
+
+        let isCollapsed = false;
+        toggleButton.addEventListener('click', function () {
+            isCollapsed = !isCollapsed;
+            panel.classList.toggle('collapsed');
+            if (!isCollapsed) {
+                panel.style.pointerEvents = 'auto';
+            }
+        });
+
+        panel.addEventListener('click', function (e) {
+            if (isCollapsed && e.target === panel) {
+                panel.classList.remove('collapsed');
+                isCollapsed = false;
+            }
+        });
+
+        panel.addEventListener('touchstart', function (e) {
+            e.preventDefault();
+            if (isCollapsed && e.target === panel) {
+                panel.classList.remove('collapsed');
+                isCollapsed = false;
+            }
+        });
+
+        toggleButton.addEventListener('touchstart', function (e) {
+            e.preventDefault();
+            isCollapsed = !isCollapsed;
+            panel.classList.toggle('collapsed');
+            if (!isCollapsed) {
+                panel.style.pointerEvents = 'auto';
+            }
         });
 
         const fpsContainer = document.createElement('div');
@@ -732,58 +790,71 @@ export const createScene = () => {
             borderRadius: '3px',
             textAlign: 'center',
         });
-        panel.appendChild(fpsContainer);
+        content.appendChild(fpsContainer);
         fpsState.fpsElement = fpsContainer;
 
-        const controls = {};
-
-        controls.speed = createSlider(
-            'Speed',
-            0.05,
-            2,
-            params.particleSpeed,
-            0.01,
-            (value) => {
+        const controls = {
+            speed: createSlider('Speed', 0.05, 2, params.particleSpeed, 0.01, (value) => {
                 params.particleSpeed = parseFloat(value);
-            }
-        );
-        panel.appendChild(controls.speed);
-
-        controls.size = createSlider(
-            'Size',
-            20,
-            80.0,
-            params.particleSize,
-            5,
-            (value) => {
+            }),
+            size: createSlider('Size', 20, 80.0, params.particleSize, 5, (value) => {
                 params.particleSize = parseFloat(value);
-            }
-        );
-        panel.appendChild(controls.size);
-
-        controls.spray = createSlider(
-            'Spray Width',
-            0.5,
-            5.0,
-            params.sprayWidth,
-            0.5,
-            (value) => {
+            }),
+            spray: createSlider('Spray Width', 0.5, 5.0, params.sprayWidth, 0.5, (value) => {
                 params.sprayWidth = parseFloat(value);
-            }
-        );
-        panel.appendChild(controls.spray);
-
-        controls.density = createSlider(
-            'Density',
-            0.1,
-            10,
-            params.particleDensity,
-            0.1,
-            (value) => {
+            }),
+            density: createSlider('Density', 0.1, 10, params.particleDensity, 0.1, (value) => {
                 params.particleDensity = parseFloat(value);
-            }
-        );
-        panel.appendChild(controls.density);
+            }),
+        };
+
+        Object.values(controls).forEach((control) => content.appendChild(control));
+
+        // --- Color Picker UI ---
+        const colorContainer = document.createElement('div');
+        colorContainer.style.marginBottom = '12px';
+
+        // Color input (RGB square/wheel)
+        const colorInput = document.createElement('input');
+        colorInput.type = 'color';
+        colorInput.value = currentColor;
+        colorInput.style.width = '100%';
+        colorInput.style.height = '40px';
+        colorInput.style.border = 'none';
+        colorInput.style.background = 'none';
+        colorInput.style.marginBottom = '6px';
+        colorInput.style.cursor = 'pointer';
+
+        // Hex input
+        const hexInput = document.createElement('input');
+        hexInput.type = 'text';
+        hexInput.value = currentColor;
+        hexInput.maxLength = 7;
+        hexInput.style.width = '100%';
+        hexInput.style.background = '#222';
+        hexInput.style.color = '#fff';
+        hexInput.style.border = '1px solid #444';
+        hexInput.style.borderRadius = '2px';
+        hexInput.style.padding = '4px 6px';
+        hexInput.style.fontSize = '14px';
+
+        // Sync color input and hex input
+        function setColor(val) {
+            if (!/^#[0-9a-fA-F]{6}$/.test(val)) return;
+            currentColor = val;
+            colorInput.value = val;
+            hexInput.value = val;
+            // Update material colors
+            materials.line.color.set(val);
+            materials.dot.color.set(val);
+        }
+        colorInput.addEventListener('input', (e) => setColor(e.target.value));
+        hexInput.addEventListener('change', (e) => setColor(e.target.value));
+
+        // Add to panel
+        colorContainer.appendChild(colorInput);
+        colorContainer.appendChild(hexInput);
+        content.appendChild(colorContainer);
 
         return { panel, controls };
     }
@@ -906,16 +977,16 @@ export const createScene = () => {
 
     function updateFPS(currentTime) {
         fpsState.frameCount++;
-        
+
         if (currentTime - fpsState.lastFpsUpdate >= 500) {
             const timeDelta = currentTime - fpsState.lastFpsUpdate;
             const fps = Math.round((fpsState.frameCount * 1000) / timeDelta);
-            
+
             fpsState.fps = fps;
             if (fpsState.fpsElement) {
                 fpsState.fpsElement.textContent = `FPS: ${fps}`;
             }
-            
+
             fpsState.frameCount = 0;
             fpsState.lastFpsUpdate = currentTime;
         }
@@ -954,11 +1025,11 @@ export const createScene = () => {
             for (const element of state.uiElements) {
                 document.body.removeChild(element);
             }
-            
+
             if (fpsState.fpsElement && fpsState.fpsElement.parentNode) {
                 fpsState.fpsElement.parentNode.removeChild(fpsState.fpsElement);
             }
-            
+
             document.body.removeChild(renderer.domElement);
 
             sphereGeometry.dispose();
